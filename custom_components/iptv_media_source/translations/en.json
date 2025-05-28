@@ -1,0 +1,64 @@
+{
+  "title": "IPTV Media Source",
+  "config": {
+    "title": "Set up IPTV Media Source",
+    "step": {
+      "user": {
+        "title": "IPTV Source Selection",
+        "description": "Choose how you want to provide the M3U playlist for this media source entry.",
+        "data": {
+          "source_type": "Source Type"
+        }
+      },
+      "select_country": {
+        "title": "Select IPTV.org Country",
+        "description": "Choose a country from the IPTV.org list. This will use their general M3U playlist for that country.\n\nNote: Availability and content depend on IPTV.org.",
+        "data": {
+          "country_code": "Country"
+        }
+      },
+      "custom_url": {
+        "title": "Custom M3U URL",
+        "description": "Provide your own M3U or M3U8 playlist URL.",
+        "data": {
+          "m3u_url": "M3U/M3U8 Playlist URL",
+          "friendly_name": "Friendly Name (e.g., 'My IPTV')"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect_iptv_org": "Unable to connect to IPTV.org to fetch the country list. Please check your internet connection or try providing a custom URL.",
+      "invalid_m3u_url": "The URL must be a valid link ending in .m3u or .m3u8.",
+      "unknown_source_type": "Invalid source type selected. Please try again.",
+      "no_countries_found": "Could not load any countries from IPTV.org. Their API might be temporarily unavailable or has changed. You can try again later or use a custom URL."
+    },
+    "abort": {
+      "already_configured": "This IPTV source (either country or custom URL) is already configured.",
+      "cannot_connect_iptv_org": "Failed to fetch the country list from IPTV.org. Please ensure Home Assistant can reach the internet and try again. If the problem persists, IPTV.org might be temporarily down.",
+      "no_countries_found": "No countries could be loaded from IPTV.org at this time. This might be a temporary issue with the IPTV.org service."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure IPTV Media Source",
+        "description": "Update the M3U URL or friendly name for this IPTV source.\n\n{note}",
+        "data": {
+          "m3u_url": "M3U/M3U8 Playlist URL",
+          "friendly_name": "Friendly Name"
+        }
+      }
+    },
+    "error": {
+      "invalid_m3u_url_format": "The URL must end with .m3u or .m3u8.",
+      "cannot_change_iptv_org_url": "The M3U URL for an IPTV.org source cannot be changed here as it's tied to the selected country. To change the country, please remove and re-add the source."
+    }
+  },
+  "entity": {
+    "media_player": {
+      "iptv_channel": {
+        "name": "{channel_name}"
+      }
+    }
+  }
+}

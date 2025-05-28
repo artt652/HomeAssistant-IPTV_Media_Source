@@ -1,0 +1,12 @@
+{
+  "domain": "iptv_media_source",
+  "name": "IPTV Media Source",
+  "documentation": "https://github.com/yohaybn/HomeAssistant-IPTV_Media_Source",
+  "issue_tracker": "https://github.com/yohaybn/HomeAssistant-IPTV_Media_Source/issues",
+  "codeowners": ["@yohaybn"],
+  "requirements": ["aiohttp"],
+  "iot_class": "cloud_polling",
+  "config_flow": true,
+  "media_source": true,
+  "version": "0.1.0"
+}

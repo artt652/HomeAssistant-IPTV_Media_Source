@@ -1,0 +1,275 @@
+"""MediaSource implementation for IPTV Media Source."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+import time
+from typing import cast  # Not used, can be removed
+
+import aiohttp
+from homeassistant.components.media_player.const import (  # Import media classes
+    MEDIA_CLASS_CHANNEL,
+    MEDIA_CLASS_DIRECTORY,
+    MEDIA_CLASS_PLAYLIST,
+    MEDIA_CLASS_VIDEO,  # As a fallback if more specific isn't clear
+)
+from homeassistant.components.media_player.errors import BrowseError
+from homeassistant.components.media_source.error import Unresolvable
+from homeassistant.components.media_source.models import (
+    BrowseMediaSource,
+    MediaSource,
+    MediaSourceItem,
+    PlayMedia,
+)
+from homeassistant.config_entries import ConfigEntry  # For type hinting if needed
+from homeassistant.core import (
+    HomeAssistant,
+    callback,
+)  # callback not used, can be removed
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from .const import DOMAIN, CONF_M3U_URL, CONF_FRIENDLY_NAME
+
+_LOGGER = logging.getLogger(__name__)
+
+# Regex to capture channel information from #EXTINF line
+EXTINF_REGEX = re.compile(
+    r"#EXTINF:(?P<duration>-?\d+)"
+    r'(?:\s+tvg-id="(?P<tvg_id>[^"]*)")?'
+    r'(?:\s+tvg-name="(?P<tvg_name>[^"]*)")?'
+    r'(?:\s+tvg-logo="(?P<tvg_logo>[^"]*)")?'
+    r'(?:\s+group-title="(?P<group_title>[^"]*)")?'
+    r'(?:[^,"]*)'
+    r",\s*(?P<name>.+)",
+    re.IGNORECASE,
+)
+
+M3U_CACHE_SECONDS = 300  # Cache M3U content for 5 minutes
+PARSED_M3U_CACHE = {}
+
+
+async def async_parse_m3u(
+    hass: HomeAssistant, m3u_url: str, m3u_friendly_name: str
+) -> list[dict]:
+    """
+    Fetch and parse an M3U playlist URL.
+    Returns a list of channel dictionaries.
+    """
+    global PARSED_M3U_CACHE
+
+    cached_data = PARSED_M3U_CACHE.get(m3u_url)
+    if cached_data and (time.time() - cached_data["timestamp"]) < M3U_CACHE_SECONDS:
+        _LOGGER.debug(f"Using cached channels for {m3u_friendly_name} ({m3u_url})")
+        return cached_data["channels"]
+
+    _LOGGER.debug(f"Fetching M3U playlist from: {m3u_url} for {m3u_friendly_name}")
+    session = async_get_clientsession(hass)
+    channels = []
+    current_channel_info = {}
+
+    try:
+        async with session.get(m3u_url, timeout=15) as response:
+            response.raise_for_status()
+            content = await response.text()
+    except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+        _LOGGER.error(f"Error fetching M3U playlist {m3u_url}: {err}")
+        if cached_data:
+            _LOGGER.warning(
+                f"Returning stale cache for {m3u_friendly_name} due to fetch error."
+            )
+            return cached_data["channels"]
+        raise BrowseError(
+            f"Could not fetch IPTV playlist: {m3u_friendly_name}"
+        ) from err
+
+    lines = content.splitlines()
+
+    if not lines or not lines[0].strip().upper().startswith("#EXTM3U"):
+        _LOGGER.warning(
+            f"M3U file {m3u_url} does not start with #EXTM3U. Attempting to parse anyway."
+        )
+
+    for line_num, line in enumerate(lines):
+        line = line.strip()
+        if not line:
+            continue
+
+        match = EXTINF_REGEX.match(line)
+        if match:
+            current_channel_info = match.groupdict()
+            if not current_channel_info.get("name") and current_channel_info.get(
+                "tvg_name"
+            ):
+                current_channel_info["name"] = current_channel_info["tvg_name"]
+            if current_channel_info.get("name") is None:
+                current_channel_info["name"] = "Unnamed Channel"
+
+        elif current_channel_info and (
+            line.startswith("http://") or line.startswith("https://")
+        ):
+            channel_name = current_channel_info.get("name", "Unnamed Channel").strip()
+            logo = current_channel_info.get("tvg_logo")
+            group = current_channel_info.get("group_title", "Uncategorized").strip()
+
+            channels.append(
+                {
+                    "name": channel_name,
+                    "url": line,
+                    "logo": logo if logo else None,
+                    "group": group,
+                    "original_m3u_url": m3u_url,
+                }
+            )
+            current_channel_info = {}
+        elif (
+            line.startswith("http://") or line.startswith("https://")
+        ) and not current_channel_info:
+            _LOGGER.debug(
+                f"Found a URL without preceding #EXTINF: {line}. Skipping for detailed parsing."
+            )
+
+    _LOGGER.info(
+        f"Parsed {len(channels)} channels from {m3u_friendly_name} ({m3u_url})"
+    )
+    PARSED_M3U_CACHE[m3u_url] = {"timestamp": time.time(), "channels": channels}
+    return channels
+
+
+async def async_get_media_source(hass: HomeAssistant) -> MediaSource:
+    """Set up IPTV Media Source media source."""
+    return IPTVMediaSourcePlatform(hass)
+
+
+class IPTVMediaSourcePlatform(MediaSource):
+    """Provide IPTV streams as a media source, allowing channel Browse."""
+
+    name: str = "IPTV Media"
+
+    def __init__(self, hass: HomeAssistant):
+        """Initialize IPTV source."""
+        super().__init__(DOMAIN)
+        self.hass = hass
+
+    async def async_resolve_media(self, item: MediaSourceItem) -> PlayMedia:
+        """Resolve media to a playable item."""
+        stream_url = item.identifier
+        _LOGGER.debug(f"Resolving media for playback: {stream_url}")
+        return PlayMedia(stream_url, "application/x-mpegURL")
+
+    async def async_browse_media(self, item: MediaSourceItem) -> BrowseMediaSource:
+        """Return media Browse data."""
+        if item.identifier is None:
+            return await self._async_browse_root()
+        else:
+            m3u_url_to_browse = item.identifier
+            entry = self._find_entry_for_m3u_url(m3u_url_to_browse)
+            if not entry:
+                raise BrowseError(
+                    f"Configured IPTV source not found for URL: {m3u_url_to_browse}"
+                )
+
+            friendly_name = entry.data.get(CONF_FRIENDLY_NAME, "IPTV Playlist")
+            return await self._async_browse_m3u_channels(
+                m3u_url_to_browse, friendly_name
+            )
+
+    def _find_entry_for_m3u_url(self, m3u_url: str) -> ConfigEntry | None:
+        """Find the config entry associated with a given M3U URL."""
+        for entry_obj in self.hass.config_entries.async_entries(DOMAIN):
+            if entry_obj.data.get(CONF_M3U_URL) == m3u_url:
+                return entry_obj
+        return None
+
+    async def _async_browse_root(self) -> BrowseMediaSource:
+        """Browse the root of the IPTV media source, listing configured M3U files."""
+        base = BrowseMediaSource(
+            domain=DOMAIN,
+            identifier=None,
+            media_class=MEDIA_CLASS_DIRECTORY,  # **** ADDED media_class ****
+            media_content_type="application/x-mpegURL",
+            title=self.name,
+            can_play=False,
+            can_expand=True,
+            children=[],
+        )
+
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            m3u_url = entry.data.get(CONF_M3U_URL)
+            friendly_name = entry.data.get(
+                CONF_FRIENDLY_NAME, f"IPTV Source {entry.entry_id[:6]}"
+            )
+
+            if not m3u_url:
+                _LOGGER.warning(
+                    f"Config entry {entry.entry_id} for {DOMAIN} is missing an M3U URL."
+                )
+                continue
+
+            base.children.append(
+                BrowseMediaSource(
+                    domain=DOMAIN,
+                    identifier=m3u_url,
+                    media_class=MEDIA_CLASS_PLAYLIST,  # **** ADDED media_class ****
+                    media_content_type="playlist",
+                    title=friendly_name,
+                    can_play=False,
+                    can_expand=True,
+                    thumbnail=None,
+                )
+            )
+        if not base.children:
+            _LOGGER.debug("No IPTV Media Sources configured yet.")
+        return base
+
+    async def _async_browse_m3u_channels(
+        self, m3u_url: str, playlist_title: str
+    ) -> BrowseMediaSource:
+        """Browse channels within a specific M3U playlist."""
+        try:
+            channels = await async_parse_m3u(self.hass, m3u_url, playlist_title)
+        except BrowseError as e:
+            raise e
+        except Exception as e:
+            _LOGGER.error(f"Failed to parse M3U {playlist_title} ({m3u_url}): {e}")
+            raise BrowseError(f"Could not parse channels for {playlist_title}.")
+
+        playlist_browse_item = BrowseMediaSource(
+            domain=DOMAIN,
+            identifier=m3u_url,
+            media_class=MEDIA_CLASS_PLAYLIST,  # **** ADDED media_class ****
+            media_content_type="playlist",
+            title=playlist_title,
+            can_play=False,
+            can_expand=True,  # True even if no children, UI might show empty
+            children=[],
+        )
+
+        if not channels:
+            _LOGGER.info(f"No channels found in {playlist_title} ({m3u_url}).")
+            playlist_browse_item.can_expand = False  # No children, so not expandable
+            return playlist_browse_item
+
+        for channel in channels:
+            channel_stream_url = channel["url"]
+            channel_name = channel["name"]
+            channel_thumbnail = channel.get("logo")
+
+            playlist_browse_item.children.append(
+                BrowseMediaSource(
+                    domain=DOMAIN,
+                    identifier=channel_stream_url,
+                    media_class=MEDIA_CLASS_CHANNEL,  # **** ADDED media_class ****
+                    # For individual channels, could also be MEDIA_CLASS_VIDEO
+                    media_content_type="application/x-mpegURL",  # Assuming HLS for the stream
+                    title=channel_name,
+                    can_play=True,
+                    can_expand=False,
+                    thumbnail=channel_thumbnail,
+                )
+            )
+
+        playlist_browse_item.children.sort(key=lambda x: x.title)
+
+        return playlist_browse_item
