@@ -8,18 +8,11 @@ Once configured, you can browse and play individual channels from your IPTV play
 ## Features
 
 * **IPTV.org Integration**: Easily add country-specific M3U playlists from the extensive [iptv-org](https://github.com/iptv-org) collection.
-    * Displays country flags in the configuration flow and as icons for the media source in the media browser.
 * **Custom M3U/M3U8 Support**: Add any publicly accessible M3U or M3U8 playlist URL.
 * **Channel Browsing**: Navigate through individual channels within your configured playlists directly from the Home Assistant Media Browser.
 * **Channel Playback**: Play selected IPTV channels on compatible media player entities in Home Assistant.
 * **Channel Logos**: Displays channel logos (`tvg-logo` from M3U) in the media browser where available.
 * **Caching**: M3U playlist content is cached to improve performance and reduce load on source servers.
-
-## Prerequisites
-
-* Home Assistant installation.
-* HACS (Home Assistant Community Store) installed (for HACS installation method).
-* Network access from your Home Assistant instance to the M3U playlist URLs.
 
 ## Installation
 
