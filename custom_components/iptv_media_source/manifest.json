@@ -7,5 +7,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/yohaybn/HomeAssistant-IPTV_Media_Source/issues",
   "requirements": ["aiohttp"],
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
