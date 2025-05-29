@@ -7,21 +7,21 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
+import logging
+
+Logger = logging.getLogger(__name__)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Set up the component."""
-    # This component does not need to do anything specific on setup,
-    # as the config flow will handle the configuration.
+    Logger.debug("Setting up IPTV Media Source component-async_setup")
+
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up IPTV Media Source from a config entry."""
-    # Forward the setup to the media_source platform.
-    hass.async_create_task(
-        hass.config_entries.async_forward_entry_setup(entry, "media_source")
-    )
+    Logger.debug("Setting up IPTV Media Source component-async_setup_entry")
     return True
 
 
