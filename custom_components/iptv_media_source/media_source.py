@@ -10,10 +10,7 @@ from typing import cast  # Not used, can be removed
 
 import aiohttp
 from homeassistant.components.media_player.const import (  # Import media classes
-    MEDIA_CLASS_CHANNEL,
-    MEDIA_CLASS_DIRECTORY,
-    MEDIA_CLASS_PLAYLIST,
-    MEDIA_CLASS_VIDEO,  # As a fallback if more specific isn't clear
+    MediaClass,
 )
 from homeassistant.components.media_player.errors import BrowseError
 from homeassistant.components.media_source.error import Unresolvable
@@ -35,14 +32,15 @@ from .const import DOMAIN, CONF_M3U_URL, CONF_FRIENDLY_NAME
 _LOGGER = logging.getLogger(__name__)
 
 # Regex to capture channel information from #EXTINF line
+
 EXTINF_REGEX = re.compile(
-    r"#EXTINF:(?P<duration>-?\d+)"
-    r'(?:\s+tvg-id="(?P<tvg_id>[^"]*)")?'
-    r'(?:\s+tvg-name="(?P<tvg_name>[^"]*)")?'
-    r'(?:\s+tvg-logo="(?P<tvg_logo>[^"]*)")?'
-    r'(?:\s+group-title="(?P<group_title>[^"]*)")?'
-    r'(?:[^,"]*)'
-    r",\s*(?P<name>.+)",
+    r"#EXTINF:(?P<duration>-?\d+)"  # Duration is mandatory
+    r"(?:.*?\s+tvg-id=\"(?P<tvg_id>[^\"]*)\")?"  # Optional tvg-id
+    r"(?:.*?\s+tvg-name=\"(?P<tvg_name>[^\"]*)\")?"  # Optional tvg-name
+    r"(?:.*?\s+tvg-logo=\"(?P<tvg_logo>[^\"]*)\")?"  # Optional tvg-logo
+    r"(?:.*?\s+group-title=\"(?P<group_title>[^\"]*)\")?"  # Optional group-title
+    r".*?"
+    r",\s*(?P<name>[^,]+)$",
     re.IGNORECASE,
 )
 
@@ -72,7 +70,17 @@ async def async_parse_m3u(
     try:
         async with session.get(m3u_url, timeout=15) as response:
             response.raise_for_status()
-            content = await response.text()
+            try:
+                content = await response.text(encoding="utf-8")
+            except UnicodeDecodeError:
+                _LOGGER.warning(
+                    f"Failed to decode M3U {m3u_url} as UTF-8. Attempting with 'latin-1'."
+                )
+                # Read raw bytes and decode using latin-1, replacing errors
+                raw_bytes = await response.read()
+                content = raw_bytes.decode("latin-1", errors="replace")
+                _LOGGER.debug(f"Successfully decoded M3U {m3u_url} with 'latin-1'.")
+
     except (aiohttp.ClientError, asyncio.TimeoutError) as err:
         _LOGGER.error(f"Error fetching M3U playlist {m3u_url}: {err}")
         if cached_data:
@@ -187,7 +195,7 @@ class IPTVMediaSourcePlatform(MediaSource):
         base = BrowseMediaSource(
             domain=DOMAIN,
             identifier=None,
-            media_class=MEDIA_CLASS_DIRECTORY,  # **** ADDED media_class ****
+            media_class=MediaClass.DIRECTORY,
             media_content_type="application/x-mpegURL",
             title=self.name,
             can_play=False,
@@ -211,7 +219,7 @@ class IPTVMediaSourcePlatform(MediaSource):
                 BrowseMediaSource(
                     domain=DOMAIN,
                     identifier=m3u_url,
-                    media_class=MEDIA_CLASS_PLAYLIST,  # **** ADDED media_class ****
+                    media_class=MediaClass.PLAYLIST,
                     media_content_type="playlist",
                     title=friendly_name,
                     can_play=False,
@@ -238,7 +246,7 @@ class IPTVMediaSourcePlatform(MediaSource):
         playlist_browse_item = BrowseMediaSource(
             domain=DOMAIN,
             identifier=m3u_url,
-            media_class=MEDIA_CLASS_PLAYLIST,  # **** ADDED media_class ****
+            media_class=MediaClass.PLAYLIST,
             media_content_type="playlist",
             title=playlist_title,
             can_play=False,
@@ -260,8 +268,7 @@ class IPTVMediaSourcePlatform(MediaSource):
                 BrowseMediaSource(
                     domain=DOMAIN,
                     identifier=channel_stream_url,
-                    media_class=MEDIA_CLASS_CHANNEL,  # **** ADDED media_class ****
-                    # For individual channels, could also be MEDIA_CLASS_VIDEO
+                    media_class=MediaClass.CHANNEL,
                     media_content_type="application/x-mpegURL",  # Assuming HLS for the stream
                     title=channel_name,
                     can_play=True,
