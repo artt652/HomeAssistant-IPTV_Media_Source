@@ -117,9 +117,9 @@ async def async_parse_m3u(
         elif current_channel_info and (
             line.startswith("http://") or line.startswith("https://")
         ):
-            channel_name = current_channel_info.get("name", "Unnamed Channel").strip()
+            channel_name = (current_channel_info.get("name") or "Unnamed Channel").strip()
             logo = current_channel_info.get("tvg_logo")
-            group = current_channel_info.get("group_title", "Uncategorized").strip()
+            group = (current_channel_info.get("group_title") or "Uncategorized").strip()
 
             channels.append(
                 {
